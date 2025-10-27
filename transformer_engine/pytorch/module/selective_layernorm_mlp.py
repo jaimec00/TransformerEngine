@@ -74,7 +74,7 @@ from ..tensor.float8_tensor import (
 from ..tensor.mxfp8_tensor import MXFP8Quantizer
 from ..tensor.float8_blockwise_tensor import Float8BlockQuantizer
 from ._common import apply_normalization, WeightGradStore
-from ..cpu_offload import is_cpu_offload_enabled, mark_activation_offload
+from ..cpu_offload import is_cpu_offload_enabled, mark_activation_offload # not used
 from ..tensor.quantized_tensor import (
     QuantizedTensorBase,
     Quantizer,
@@ -211,7 +211,7 @@ class _SelectiveLayerNormMLP(torch.autograd.Function):
         # would be better to do some more complex logic to preprocess
         # first and then save the processed tensors for bwd, but then the recomputation
         # gets too complex for now. redoing the preprocessing in the recomputation bwd is simpler,
-        # but obv less efficient, so in the future i would like to fic that
+        # but obv less efficient, so in the future i would like to fix that
         if is_grad_enabled and not recompute_for_bwd:
 
             tensors_to_save, tensor_objs = prepare_for_saving(inp, ln_weight, ln_bias, fc1_weight, fc1_bias, fc2_weight, fc2_bias)
@@ -808,11 +808,12 @@ class _SelectiveLayerNormMLP(torch.autograd.Function):
             skip_fp8_weight_update,
             symmetric_ar_type,
             debug,
-            recompute_for_bwd=False
+            recompute_for_bwd=False # compute full fwd, including fc2
         )
     
     @staticmethod
     def _recompute(ctx):
+        # pylint: disable=missing-function-docstring
 
         # load the state from the start of forward
         saved_tensors = ctx.saved_tensors
