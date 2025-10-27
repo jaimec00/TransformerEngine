@@ -293,8 +293,8 @@ class _SelectiveLayerNormMLP(torch.autograd.Function):
             ub_overlap_rs_dgrad = False
             ub_bulk_wgrad = False
             ub_bulk_dgrad = False
-        ub_overlap_ag = ub_overlap_ag and is_grad_enabled and recompute_for_bwd and not return_layernorm_output_gathered
-        ub_overlap_rs = ub_overlap_rs and is_grad_enabled and recompute_for_bwd
+        ub_overlap_ag = ub_overlap_ag and is_grad_enabled and not return_layernorm_output_gathered
+        ub_overlap_rs = ub_overlap_rs and is_grad_enabled
 
         # Choose whether to use GEMM kernel with split accumulator
         use_split_accumulator = _2X_ACC_FPROP
@@ -393,7 +393,7 @@ class _SelectiveLayerNormMLP(torch.autograd.Function):
             # If weights are not quantized, we call get_weight_workspace,
             # which handles weight caching etc.
             # FP8 cast to workspace buffer
-            update_workspace = is_first_microbatch is None or is_first_microbatch
+            update_workspace = (is_first_microbatch is None or is_first_microbatch) and not recompute_for_bwd # not recompute for bwd, means this is the first time we are computing in fwd, so need to update
             fc1_weight_quantizer.set_usage(rowwise=True, columnwise=is_grad_enabled and recompute_for_bwd)
             fc2_weight_quantizer.set_usage(rowwise=True, columnwise=is_grad_enabled and recompute_for_bwd)
             fc1_weight_final = module.get_weight_workspace(
