@@ -96,7 +96,12 @@ class Profiler:
 
         use_cuda = device.type == "cuda" and torch.cuda.is_available()
 
+        def _warmup(model, tensor):
+            for i in range(3):
+                model(tensor).sum().backward()
+
         def _run_fwd(model, tensor):
+
             if use_cuda:
                 torch.cuda.reset_peak_memory_stats(device)
                 torch.cuda.synchronize()
@@ -112,18 +117,8 @@ class Profiler:
                 mem = max(0.0, float(peak_mem - start_mem))
             return out, elapsed, mem
 
-        ln_out, ln_time, ln_mem = _run_fwd(ln_model, data.clone())
-        sln_out, sln_time, sln_mem = _run_fwd(sln_model, data.clone())
-
-        self.stats["ln_stats"]["fwd_stats"]["time"].append(ln_time)
-        self.stats["ln_stats"]["fwd_stats"]["mem"].append(ln_mem)
-        self.stats["sln_stats"]["fwd_stats"]["time"].append(sln_time)
-        self.stats["sln_stats"]["fwd_stats"]["mem"].append(sln_mem)
-
-        # Track maximum absolute difference between outputs as a convergence metric.
-        self.stats["diff"]["out"].append(self._max_diff(ln_out, sln_out))
-
         def _run_bwd(model, out):
+
             model.zero_grad(set_to_none=False)
 
             loss = out.sum()
@@ -145,13 +140,26 @@ class Profiler:
             param_grads = self._collect_param_grads(model)
             return param_grads, elapsed, mem
 
-        ln_grads, ln_time, ln_mem = _run_bwd(ln_model, ln_out)
-        sln_grads, sln_time, sln_mem = _run_bwd(sln_model, sln_out)
+        _warmup(ln_model, data.clone())
+        ln_fwd_out, ln_fwd_time, ln_fwd_mem = _run_fwd(ln_model, data.clone())
+        ln_grads, ln_bwd_time, ln_bwd_mem = _run_bwd(ln_model, ln_fwd_out)
 
-        self.stats["ln_stats"]["bwd_stats"]["time"].append(ln_time)
-        self.stats["ln_stats"]["bwd_stats"]["mem"].append(ln_mem)
-        self.stats["sln_stats"]["bwd_stats"]["time"].append(sln_time)
-        self.stats["sln_stats"]["bwd_stats"]["mem"].append(sln_mem)
+        _warmup(sln_model, data.clone())
+        sln_fwd_out, sln_fwd_time, sln_fwd_mem = _run_fwd(sln_model, data.clone())
+        sln_grads, sln_bwd_time, sln_bwd_mem = _run_bwd(sln_model, sln_fwd_out)
+
+        self.stats["ln_stats"]["fwd_stats"]["time"].append(ln_fwd_time)
+        self.stats["ln_stats"]["fwd_stats"]["mem"].append(ln_fwd_mem)
+        self.stats["sln_stats"]["fwd_stats"]["time"].append(sln_fwd_time)
+        self.stats["sln_stats"]["fwd_stats"]["mem"].append(sln_fwd_mem)
+
+        # Track maximum absolute difference between outputs as a convergence metric.
+        self.stats["diff"]["out"].append(self._max_diff(ln_fwd_out, sln_fwd_out))
+
+        self.stats["ln_stats"]["bwd_stats"]["time"].append(ln_bwd_time)
+        self.stats["ln_stats"]["bwd_stats"]["mem"].append(ln_bwd_mem)
+        self.stats["sln_stats"]["bwd_stats"]["time"].append(sln_bwd_time)
+        self.stats["sln_stats"]["bwd_stats"]["mem"].append(sln_bwd_mem)
 
         for key in ["layer_norm_weight", "layer_norm_bias", "fc1_weight", "fc1_bias", "fc2_weight", "fc2_bias"]:
             self.stats["diff"][key].append(self._max_diff(ln_grads[key], sln_grads[key]))
@@ -233,16 +241,10 @@ def main():
 
             dummy_data = torch.randn((seq_len, config[size]._hidden_size), device=device)
 
-            # warmup first, so kernel launch doesnt affect time
-            for i in range(3):
-                ln_model(dummy_data)
-                sln_model(dummy_data)
-
             profiler.compare(ln_model, sln_model, dummy_data)
 
-            print(f"summarizing comparison for seq={seq_len}, hidden={config[size]._hidden_size}, ffn_fidden={config[size]._ffn_hidden_size}, layers={config[size]._layers}")
+            print(f"summarizing comparison for seq={seq_len}, hidden={config[size]._hidden_size}, ffn_fidden={config[size]._ffn_hidden_size}, layers={config[size]._layers}\n")
             profiler.summarize()
-            print()
 
 if __name__ == "__main__":
     main()
